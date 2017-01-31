@@ -17,12 +17,13 @@ function getAllSongsUrls(){
 
     for(var i = 0; i < letters.length; i++){
         currentLetterUrl = browseUrl + letters[i];
+        
         //List request
-        request(currentLetterUrl, function(err, res, body) {
+        request(getRequestOption(currentLetterUrl), function(err, res, body) {
             var $ = cheerio.load(body);
             $('#EchoTopic > p ~ p > a').each(function(){
                 var link = $(this).attr('href');
-                var albumName = $(this).val();
+                var albumName = $(this).html();
 
                 var currentAlbumObject = {
                     albumName : albumName,
@@ -31,19 +32,20 @@ function getAllSongsUrls(){
                 }; 
 
                 //Single album request
-                request(currentLetterUrl, function(err, res, body) {
-                    var firstElement = true;
+                request(getRequestOption(link), function(err, res, body) {
                     var albumBody = cheerio.load(body);
 
-                    $('#EchoTopic > table > tbody > tr').each(function(){
-                        if(firstElement == false){
-                            var mp3Url = albumBody(this).find('td > a').attr('href');
-                            var songName = albumBody(this).find('td > a').val();
+                    albumBody('a').each(function(i, elem){
+                            var mp3Url = albumBody(this).attr('href');
+                            var songName = albumBody(this).html();
+
+                            if(mp3Url.toLowerCase().includes(link) == false || songName == "Download")
+                                return;
 
                             //Mp3 download request
-                            request(mp3Url, function(err, res, body){
+                            request(getRequestOption(mp3Url), function(err, res, body){
                                 var mp3DownloadBody = cheerio.load(body);
-                                var mp3Url = mp3DownloadBody(this).find('#EchoTopic > audio').attr('src');
+                                var mp3Url = mp3DownloadBody('audio').attr('src');
 
                                 var songInfo = {
                                     songName : songName,
@@ -51,12 +53,9 @@ function getAllSongsUrls(){
                                 };
 
                                 currentAlbumObject.tracks.push(songInfo);
+                                fs.writeFileSync('songs.json', JSON.stringify(trackObjects));
                             });
-                        } 
-                        else {
-                            firstElement = false;
-                        }
-                    });
+                        });
                 });
 
                 trackObjects.push(currentAlbumObject);
@@ -69,12 +68,31 @@ function getAllSongsUrls(){
 
 app.use(cors());
 
-app.get('/', function (req, res) {
-    getAllSongsUrls();
-    res.send(trackObjects);
+function getRequestOption(url){
+    return {
+        uri: url,
+        method:'GET',
+        headers: {
+            'Proxy-Connection' : 'keep-alive',
+            'Upgrade-Insecure-Requests' : '1'
+        },
+        forever:true
+    };
+}
+
+app.get('/gettracks', function (req, res) {
+    if(fs.existsSync('songs.json')){
+        var jsonObject = fs.readFileSync('songs.json').toString();
+        res.send(JSON.parse(jsonObject));
+    } else {
+        res.send({});
+    }
 });
 
-app.use('/api', express.static(__dirname));
+app.get('/start', function(req, res){
+    getAllSongsUrls();
+    res.redirect('/gettracks');
+});
 
 var port = process.env.PORT || 8080;
 
